@@ -20,23 +20,49 @@ use std::io;
 
 use serde_json::{Value,  json};
 
-static CARDS: &'static [&str] = &["Section", "Note", "Social", "Link", "Album", "Photo", "Counter", "Map"];
+static CARDS: &'static [&str] = &["Section", "Note", "Social", "Link", "Photo", "Album", "Counter", "Map"];
 static SHAPES: &'static [&str] = &["4x4", "4x2", "2x4", "2x2", "1x4"];
 
+// Grayscale
 static COLORS: &[Color] = &[
-    Color::LightRed,
-    Color::LightGreen,
-    Color::LightBlue,
-    Color::LightMagenta,
-    Color::LightCyan,
-    Color::White,
-    Color::Indexed(213),
-    Color::Indexed(202),
+    Color::Indexed(255),  // red
+    Color::Indexed(252),  // pink
+    Color::Indexed(249),  // orange
+    Color::Indexed(246),   // blue
+    Color::Indexed(243),   // cyan
+    Color::Indexed(240),   // green
+    Color::Indexed(237),   // dark green
+    Color::Indexed(231),  // light yellow
 ];
+
+// Mondrian
+static MOND_COLORS: &[Color] = &[
+    Color::Indexed(220),  // yellow
+    Color::Indexed(027),  // blue
+    Color::Indexed(016),  // gray
+    Color::Indexed(124),  // red
+    Color::Indexed(255),  // white
+    Color::Indexed(220),  // yellow
+    Color::Indexed(027),  // blue
+    Color::Indexed(124),  // red
+];
+
+// Soft
+static SOFT_COLORS: &[Color] = &[
+    Color::Indexed(175),
+    Color::Indexed(104),
+    Color::Indexed(116),
+    Color::Indexed(115),
+    Color::Indexed(150),
+    Color::Indexed(186),
+    Color::Indexed(180),
+    Color::Indexed(174),
+];
+
 
 fn get_card_color(card: &str) -> Color {
     if let Some(index) = CARDS.iter().position(|x| *x == card) {
-        COLORS[index]
+        MOND_COLORS[index]
     } else {
         Color::Gray
     }
@@ -356,11 +382,6 @@ fn main() -> Result<(), io::Error> {
 
                         }*/
                     }
-
-                     // Draw rectangles
-
-                    
-                    // ctx.print(start_x + 20.0, max_y - start_y + 20.0 , "1".white()); // Print text on rectangle
                 });
             
             f.render_widget(preview, chunks[2]);
