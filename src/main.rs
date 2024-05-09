@@ -1,3 +1,9 @@
+mod card;
+mod arrange;
+
+use crate::card::Card; // Import the Card struct
+use crate::arrange::{CellSize, arrange_grid};
+
 use crossterm::{
     event::{self, Event, KeyCode},
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -14,12 +20,32 @@ use std::io;
 
 use serde_json::{Value,  json};
 
-static CARDS: &'static [&str] = &["Section", "Note", "Social", "Link", "Album", "Photo", "Map"];
+static CARDS: &'static [&str] = &["Section", "Note", "Social", "Link", "Album", "Photo", "Counter", "Map"];
+static SHAPES: &'static [&str] = &["4x4", "4x2", "2x4", "2x2", "1x4"];
+
+static COLORS: &[Color] = &[
+    Color::LightRed,
+    Color::LightGreen,
+    Color::LightBlue,
+    Color::LightMagenta,
+    Color::LightCyan,
+    Color::White,
+    Color::Indexed(213),
+    Color::Indexed(202),
+];
+
+fn get_card_color(card: &str) -> Color {
+    if let Some(index) = CARDS.iter().position(|x| *x == card) {
+        COLORS[index]
+    } else {
+        Color::Gray
+    }
+}
 
 enum TuiState {
     Select(usize),
     Edit(usize),
-    Create(usize, usize),
+    Create(usize, usize, usize),
     Delete(usize),
 }
 
@@ -80,8 +106,19 @@ fn parse_data(json_data: &Value) -> Data {
         if let Value::Object(map) = obj {
             // Iterate over key-value pairs in the object
             for (key, value) in map {
-                cards.push(key.clone());
+                // if let value_map = serde_json::from_str(value) {
+                let key_str = if key != "Section"  {
+                    if let Some(shape) = value.get("shape").and_then(Value::as_str) {
+                        format!("{}-{}", key, shape)
+                    } else {
+                        format!("{}-2x2", key)
+                    }
+                } else {
+                    format!("{}-1x8", key)
+                };
+                cards.push(key_str);
                 contents.push(format_json_value(value));
+                // }
             }
         }
     }
@@ -119,7 +156,8 @@ fn save_data_to_file(data: &Data, filename: &str) -> Result<(), Box<dyn std::err
         let json_value: Result<Value, _> = serde_json::from_str(&value);
         match json_value {
             Ok(value) => {
-                let item = json!({key.clone(): value});
+                let original_key = if let Some((trimmed, _)) = key.split_once('-') { trimmed } else { key };
+                let item = json!({original_key: value});
                 showcase.as_array_mut().unwrap().push(item);
             }
             Err(e) => return Err(Box::new(e)),
@@ -202,12 +240,16 @@ fn main() -> Result<(), io::Error> {
                 .iter()
                 .enumerate()
                 .map(|(i, title)| {
-                    let mut style = Style::default().fg(Color::White);
+                    let original_title = if let Some((trimmed, _)) = title.split_once('-') { trimmed } else { title };
+                    let mut style = Style::default().fg(get_card_color(original_title));
+
                     if let TuiState::Select(selected_index) = tui_state {
                         if i == selected_index {
-                            style = Style::default().fg(Color::Yellow);
+                            style = Style::default().bg(Color::Yellow).fg(Color::Black);
                         }
                     }
+
+
                     let prefix = if i == 0 { ">".to_string() } else { format!("{}.", i) };
                     ListItem::new(Span::styled(String::from(
                         format!("{} {}", prefix, title)
@@ -253,26 +295,72 @@ fn main() -> Result<(), io::Error> {
                     .borders(Borders::ALL),
             );
 
+            text_area.set_line_number_style(Style::default().fg(Color::DarkGray));
+
             f.render_widget(text_area.widget(), chunks[1]);
 
             // 第三列：内容预览
+            let max_x = 200.0;
+            let max_y = 500.0;
             let preview = Canvas::default()
+                .marker(symbols::Marker::HalfBlock)
                 .block(Block::default().title("Preview").borders(Borders::ALL))
+                .x_bounds([0.0, max_x])
+                .y_bounds([0.0, max_y])
                 .paint(|ctx| {
-                    let square_size = 2.0;
-                    for row in 0..5 {
-                        for col in 0..5 {
-                            let x = col as f64 * square_size;
-                            let y = row as f64 * square_size;
-                            ctx.draw(&Rectangle {
-                                x: 100.0+x,
-                                y: 100.0+y,
-                                width: square_size,
-                                height: square_size,
-                                color: Color::Red,
+
+                    let selected_index = match tui_state {
+                        TuiState::Edit(idx) => idx,
+                        TuiState::Select(idx) => idx,
+                        TuiState::Create(idx, _, _) => idx,
+                        TuiState::Delete(idx) => idx,
+                    };
+
+                    let start_x = 20.0;
+                    let start_y = 5.0;
+                    let gap_x = 5.0;
+                    let gap_y = 5.0;
+
+                    write_info!(format!("cell list: {:?}", &titles[1..]));
+
+                    let cell_size_list = arrange_grid((50, 8), &titles[1..]);
+
+                    write_info!(format!("cell size list: {:?}", cell_size_list));
+
+                    for (i, cell_size) in cell_size_list.iter().enumerate() {
+                        let x = start_x + (cell_size.get_start_col() * 20) as f64 + gap_x;
+                        let y = start_y + (cell_size.get_start_row() * 20) as f64 + gap_y;
+                        let w = (cell_size.get_width() * 20) as f64 - gap_x * 2.0;
+                        let h = (cell_size.get_height() * 20) as f64 - gap_y * 2.0;
+
+                        // if i+1 != selected_index {
+                            ctx.draw(&Card {
+                                x,
+                                y: max_y - y - h,
+                                width: w,
+                                height: h,
+                                color: if i+1 != selected_index {
+                                    get_card_color(cell_size.get_card_type())
+                                } else {
+                                    Color::Yellow
+                                },
                             });
-                        }
+                        /*} else {
+                            ctx.draw(&Rectangle {
+                                x: x,
+                                y: max_y - y - h,
+                                width: w,
+                                height: h,
+                                color: get_card_color(cell_size.get_card_type()),
+                            });
+
+                        }*/
                     }
+
+                     // Draw rectangles
+
+                    
+                    // ctx.print(start_x + 20.0, max_y - start_y + 20.0 , "1".white()); // Print text on rectangle
                 });
             
             f.render_widget(preview, chunks[2]);
@@ -280,8 +368,8 @@ fn main() -> Result<(), io::Error> {
             // 底部状态栏
             let status_bar_text = match tui_state {
                 TuiState::Edit(_) => "Shortcuts: Go Back(Esc)",
-                TuiState::Select(_) => "Shortcuts: Move Cursor(↑↓) Enter(↵) Create New(N) Delete(D) Quit(Q)",
-                TuiState::Create(_, _) => "Shortcuts: Move Cursor(↑↓) Enter(↵) Cancel(Esc)",
+                TuiState::Select(_) => "Shortcuts: Move Cursor(↑↓) Select(↵) Create New(N) Delete(D) Quit(Q)",
+                TuiState::Create(_, _, _) => "Shortcuts: Move Cursor(↑↓) Confirm Create(↵) Cancel(Esc)",
                 TuiState::Delete(_) => "Shortcuts: Confirm Delete(↵) Cancel(Esc)"
             };
             
@@ -295,7 +383,7 @@ fn main() -> Result<(), io::Error> {
                 ])
             .split(size)[1]);
 
-            if let TuiState::Create(_, card_index) = tui_state {
+            if let TuiState::Create(_, card_index, shape_index) = tui_state {
 
                 let center_area = centered_rect(20, 25, size);
 
@@ -304,7 +392,8 @@ fn main() -> Result<(), io::Error> {
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(Color::Cyan));
 
-                let items: Vec<ListItem> = CARDS
+                let items: Vec<ListItem> = if shape_index == 999 {
+                    CARDS
                     .iter()
                     .enumerate()
                     .map(|(i, option)| {
@@ -315,7 +404,21 @@ fn main() -> Result<(), io::Error> {
                         };
                         ListItem::new(Span::styled(*option, style))
                     })
-                    .collect();
+                    .collect()
+                } else {
+                    SHAPES
+                    .iter()
+                    .enumerate()
+                    .map(|(i, option)| {
+                        let style = if i == shape_index {
+                            Style::default().fg(Color::Yellow)
+                        } else {
+                            Style::default().fg(Color::White)
+                        };
+                        ListItem::new(Span::styled(*option, style))
+                    })
+                    .collect()
+                };
 
                 let list = List::new(items).block(block);
                 f.render_widget(Clear, center_area);
@@ -356,7 +459,7 @@ fn main() -> Result<(), io::Error> {
                     match tui_state {
                         TuiState::Edit(_) => { text_area.input(key_event); },
                         TuiState::Select(selected_index) => {
-                            tui_state = TuiState::Create(selected_index, 0);
+                            tui_state = TuiState::Create(selected_index, 0, 999);
                         },
                         _ => (),
                     }
@@ -390,13 +493,20 @@ fn main() -> Result<(), io::Error> {
                             oops_count = 0;
                             // contents[selected_index] = text_area.lines().to_vec();
                         },
-                        TuiState::Create(selected_index, card_index) => {
-                            if let Some(card) = create_card(card_index) {
-                                let card_type = CARDS[card_index];
-                                contents.insert(selected_index + 1, card);
-                                titles.insert(selected_index + 1, card_type.to_string());
-                                tui_state = TuiState::Edit(selected_index + 1);
-                                text_area = TextArea::new(contents[selected_index + 1].clone());
+                        TuiState::Create(selected_index, card_index, shape_index) => {
+                            if shape_index == 999 {
+                                tui_state = TuiState::Create(selected_index, card_index, 0);
+                            } else {
+                                if let Some(card) = create_card(card_index) {
+                                    
+                                    contents.insert(selected_index + 1, card);
+
+                                    let title_str = format!("{}-{}", CARDS[card_index], SHAPES[shape_index]);
+                                    titles.insert(selected_index + 1, title_str);
+
+                                    tui_state = TuiState::Edit(selected_index + 1);
+                                    text_area = TextArea::new(contents[selected_index + 1].clone());
+                                }
                             }
                         },
                         TuiState::Delete(selected_index) => {
@@ -417,7 +527,7 @@ fn main() -> Result<(), io::Error> {
                                 oops_count += 1;
                             }
                         }
-                        TuiState::Create(selected_index, _) => {
+                        TuiState::Create(selected_index, _, _) => {
                             tui_state = TuiState::Select(selected_index);
                         }
                         TuiState::Select(_) => (),
@@ -435,10 +545,15 @@ fn main() -> Result<(), io::Error> {
                                 text_area = TextArea::new(contents[selected_index - 1].clone());
                             }
                         },
-                        TuiState::Create(selected_index, card_index) => {
-                            // TODO: card
-                            if card_index > 0 {
-                                tui_state = TuiState::Create(selected_index, card_index - 1);
+                        TuiState::Create(selected_index, card_index, shape_index) => {
+                            if shape_index == 999 {
+                                if card_index > 0 {
+                                    tui_state = TuiState::Create(selected_index, card_index - 1, 999);
+                                }
+                            } else {
+                                if shape_index > 0 {
+                                    tui_state = TuiState::Create(selected_index, card_index, shape_index - 1);
+                                }
                             }
                         }
                         TuiState::Delete(_) => (),
@@ -453,10 +568,15 @@ fn main() -> Result<(), io::Error> {
                                 text_area = TextArea::new(contents[selected_index + 1].clone());
                             }
                         },
-                        TuiState::Create(selected_index, card_index) => {
-                            // TODO: card
-                            if card_index < CARDS.len() - 1 {
-                                tui_state = TuiState::Create(selected_index, card_index + 1);
+                        TuiState::Create(selected_index, card_index, shape_index) => {
+                            if shape_index == 999 {
+                                if card_index < CARDS.len() - 1 {
+                                    tui_state = TuiState::Create(selected_index, card_index + 1, 999);
+                                }
+                            } else {
+                                if shape_index < SHAPES.len() - 1 {
+                                    tui_state = TuiState::Create(selected_index, card_index, shape_index + 1);
+                                }
                             }
                         },
                         TuiState::Delete(_) => (),
@@ -530,5 +650,40 @@ impl fmt::Display for Data {
             writeln!(f, "    {}", content.join("\n"))?;
         }
         Ok(())
+    }
+}
+
+
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+
+    #[test]
+    fn test_arrange() {
+
+        write_info!("test arrange");
+        
+        // let cards = vec!["Link-2x2", "Map-2x4", "Counter-1x4", "Link-2x4",
+           //              "Section-1x8", "Note-2x2", "Album-4x4"];
+
+        let string_array = [
+            "Section-1x8", "Note-4x4", "Note-4x2", "Note-2x4", "Social-2x2", "Counter-1x4", "Section-1x8",
+            "Social-2x2", "Social-2x4", "Link-1x4", "Link-2x4", "Album-4x4", "Section-1x8", "Photo-4x2",
+            "Section-1x8",
+        ];
+
+        let cards: Vec<String> = string_array.iter().map(|s| String::from(*s)).collect();
+
+
+        let l = arrange_grid((50, 8), &cards);
+        write_info!(format!("len: {}", l.len()));
+        for c in l.iter() {
+            write_info!(format!("{:?}", c));
+        }
+
+
+    // assert_eq!(adder(-2, 3), 1);
     }
 }
