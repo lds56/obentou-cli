@@ -1,221 +1,14 @@
-mod card;
-mod arrange;
+use obentou_cli::app::App;
 
-use crate::card::Card; // Import the Card struct
-use crate::arrange::{CellSize, arrange_grid};
+use anyhow::Result;
 
-use crossterm::{
-    event::{self, Event, KeyCode},
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
-};
-use ratatui::prelude::*;
-use ratatui::widgets::{canvas::*, *};
-use tui_textarea::TextArea;
-
-use std::env;
-use std::fs::{File, OpenOptions};
-use std::io::{Read, Write, Seek, SeekFrom};
-use std::fmt;
-use std::io;
-
-use serde_json::{Value,  json};
-
-static CARDS: &'static [&str] = &["Section", "Note", "Social", "Link", "Photo", "Album", "Counter", "Map"];
-static SHAPES: &'static [&str] = &["4x4", "4x2", "2x4", "2x2", "1x4"];
-
-// Grayscale
-static COLORS: &[Color] = &[
-    Color::Indexed(255),  // red
-    Color::Indexed(252),  // pink
-    Color::Indexed(249),  // orange
-    Color::Indexed(246),   // blue
-    Color::Indexed(243),   // cyan
-    Color::Indexed(240),   // green
-    Color::Indexed(237),   // dark green
-    Color::Indexed(231),  // light yellow
-];
-
-// Mondrian
-static MOND_COLORS: &[Color] = &[
-    Color::Indexed(220),  // yellow
-    Color::Indexed(027),  // blue
-    Color::Indexed(016),  // gray
-    Color::Indexed(124),  // red
-    Color::Indexed(255),  // white
-    Color::Indexed(220),  // yellow
-    Color::Indexed(027),  // blue
-    Color::Indexed(124),  // red
-];
-
-// Soft
-static SOFT_COLORS: &[Color] = &[
-    Color::Indexed(175),
-    Color::Indexed(104),
-    Color::Indexed(116),
-    Color::Indexed(115),
-    Color::Indexed(150),
-    Color::Indexed(186),
-    Color::Indexed(180),
-    Color::Indexed(174),
-];
-
-
-fn get_card_color(card: &str) -> Color {
-    if let Some(index) = CARDS.iter().position(|x| *x == card) {
-        MOND_COLORS[index]
-    } else {
-        Color::Gray
-    }
-}
-
-enum TuiState {
-    Select(usize),
-    Edit(usize),
-    Create(usize, usize, usize),
-    Delete(usize),
-}
-
-#[derive(Debug, Default, Clone)]
-struct Data {
-    cards: Vec<String>,
-    contents: Vec<Vec<String>>,
-}
-
-
-fn format_json(input: &str) -> Vec<String> {
-    match serde_json::from_str::<Value>(input) {
-        Ok(v) => {
-            // 尝试重新格式化为漂亮的 JSON 字符串
-            match serde_json::to_string_pretty(&v) {
-                Ok(formatted_json) => formatted_json.split("\n").map(|s| s.to_string()).collect(),
-                Err(_) => vec![input.to_string()], // 格式化失败，返回原始 JSON 字符串作为数组元素
-            }
-        }
-        Err(_) => vec![input.to_string()], // 解析失败，返回原始 JSON 字符串作为数组元素
-    }
-}
-
-fn format_json_value(value: &Value) -> Vec<String> {
-    match serde_json::to_string_pretty(&value) {
-        Ok(formatted_json) => formatted_json.split("\n").map(|s| s.to_string()).collect(),
-        Err(_) => vec![value.to_string()], // 格式化失败，返回原始 JSON 字符串作为数组元素
-    }
-}
-
-macro_rules! write_info {
-    ($content:expr) => {{
-        let mut file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .append(true)
-            .open("log.txt")
-            .expect("Failed to open file");
-
-        writeln!(file, "{}", $content).expect("Failed to write to file");
-    }};
-}
-
-fn parse_data(json_data: &Value) -> Data {
-
-    let profile = &json_data["profile"];
-    let showcase = &json_data["showcase"];
-
-    let arr = showcase.as_array().unwrap();
-
-    // .map(|v| serde_json::to_string(v).unwrap())
-        
-    let mut cards = vec!["Profile".to_string()];
-    let mut contents = vec![format_json_value(&profile)];
-
-    // Iterate over each object in the array
-    for obj in arr {
-        if let Value::Object(map) = obj {
-            // Iterate over key-value pairs in the object
-            for (key, value) in map {
-                // if let value_map = serde_json::from_str(value) {
-                let key_str = if key != "Section"  {
-                    if let Some(shape) = value.get("shape").and_then(Value::as_str) {
-                        format!("{}-{}", key, shape)
-                    } else {
-                        format!("{}-2x2", key)
-                    }
-                } else {
-                    format!("{}-1x8", key)
-                };
-                cards.push(key_str);
-                contents.push(format_json_value(value));
-                // }
-            }
-        }
-    }
-    
-    Data { cards, contents }
-}
-
-
-fn parse_data_from_file(filename: &str) -> Result<Data, Box<dyn std::error::Error>> {
-
-    // write_info!(format!("read file: {}", filename));
-
-    let mut file = File::open(filename)?;
-
-    let mut data = String::new();
-    file.read_to_string(&mut data)
-        .expect("Failed to read file");
-
-    let data_json: Value = serde_json::from_str(&data)?;
-    
-    Ok(parse_data(&data_json))
-}
-
-fn save_data_to_file(data: &Data, filename: &str) -> Result<(), Box<dyn std::error::Error>> {
-
-    let mut showcase = json!([]);
-
-    let profile_str = data.contents.get(0).ok_or("No profile found")?.join("\n");
-    let profile: Value = serde_json::from_str(&profile_str)?;
-
-    for i in 1..data.cards.len() {
-
-        let key = data.cards.get(i).ok_or("No key found!")?;
-        let value = data.contents.get(i).ok_or("No value found!")?.join("\n");
-        let json_value: Result<Value, _> = serde_json::from_str(&value);
-        match json_value {
-            Ok(value) => {
-                let original_key = if let Some((trimmed, _)) = key.split_once('-') { trimmed } else { key };
-                let item = json!({original_key: value});
-                showcase.as_array_mut().unwrap().push(item);
-            }
-            Err(e) => return Err(Box::new(e)),
-        }
-    }
-
-    let output_data = json!({
-        "profile": profile,
-        "showcase": showcase,
-    });
-
-    write_info!(format!("output: {}", output_data));
-
-    let mut file = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(filename)?;
-
-    file.seek(SeekFrom::Start(0))?;
-    serde_json::to_writer_pretty(&mut file, &output_data)?;
-
+fn main() -> Result<()> {
+    let mut app = App::new(std::env::args().nth(1).unwrap_or_default())?;
+    app.run()?;
     Ok(())
 }
 
-fn create_card(card_index: usize) -> Option<Vec<String>> {
-    if card_index >= CARDS.len() {
-        return None;
-    }
-    Some(vec!["{}".to_string()])
-}
-
+/*
 fn main() -> Result<(), io::Error> {
 
     let args: Vec<String> = env::args().collect();
@@ -225,7 +18,9 @@ fn main() -> Result<(), io::Error> {
         parse_data_from_file(filename).unwrap()
     } else {
         Data::default()
-    };  // TODO: error handling
+
+  //
+  // };  // TODO: error handling
 
     // write_info!("Application started");
     write_info!(format!("data: {}", data));
@@ -462,7 +257,7 @@ fn main() -> Result<(), io::Error> {
                 f.render_widget(block, center_area);
             }
 
-        })?;
+        })?;        
 
         // 处理事件
         if let Event::Key(key_event) = event::read()? {
@@ -651,31 +446,9 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
         )
         .split(popup_layout[1])[1]
 }
+*/
 
-trait JsonValidation {
-    fn is_valid_json(&self) -> bool;
-}
-
-impl JsonValidation for String {
-    fn is_valid_json(&self) -> bool {
-        serde_json::from_str::<serde_json::Value>(self).is_ok()
-    }
-}
-
-impl fmt::Display for Data {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-
-        writeln!(f, "  Cards: {:?}", self.cards)?;
-        writeln!(f, "  Contents: ...")?;        
-        for content in &self.contents {
-            writeln!(f, "    {}", content.join("\n"))?;
-        }
-        Ok(())
-    }
-}
-
-
-
+/*
 #[cfg(test)]
 mod tests {
 
@@ -708,3 +481,4 @@ mod tests {
     // assert_eq!(adder(-2, 3), 1);
     }
 }
+*/

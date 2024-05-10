@@ -8,51 +8,6 @@ pub struct CellSize {
 }
 
 
-fn can_place_cell(grid: &[Vec<char>], row: usize, col: usize, width: usize, height: usize) -> bool {
-    for r in row..row + height {
-        for c in col..col + width {
-            if r >= grid.len() || c >= grid[0].len() || grid[r][c] != ' ' {
-                return false;
-            }
-        }
-    }
-    true
-}
-
-fn place_cell(grid: &mut [Vec<char>], row: usize, col: usize, width: usize, height: usize, char: char) {
-    for r in row..row + height {
-        for c in col..col + width {
-            grid[r][c] = char;
-        }
-    }
-}
-
-fn try_place_cell(grid: &mut [Vec<char>], width: usize, height: usize, char: char, start_row: usize) -> (usize, usize) {
-    for row in start_row..grid.len() {
-        for col in 0..=grid[0].len() - width {
-            if can_place_cell(grid, row, col, width, height) {
-                place_cell(grid, row, col, width, height, char);
-                return (row, col);
-            }
-        }
-    }
-    (start_row, 999)
-}
-
-fn add_cell(grid: &mut [Vec<char>], cell_shape: &str, cell_type: &str, cell_char: char, start_row: usize) -> CellSize {
-    let (num1, num2) = cell_shape.split_once('x').unwrap();
-    let num1: usize = num1.parse().unwrap();
-    let num2: usize = num2.parse().unwrap();
-    let (start_row, start_col) = try_place_cell(grid, num2, num1, cell_char, start_row);
-    CellSize {
-        start_row,
-        start_col,
-        width: num2,
-        height: num1,
-        card_type: cell_type.to_string(),
-    }
-}
-
 pub fn arrange_grid(grid_size: (usize, usize), cell_list: &[String]) -> Vec<CellSize> {
 
     let (grow, gcol) = grid_size;
@@ -105,5 +60,51 @@ impl CellSize {
 
     pub fn get_card_type(&self) -> &String {
         &self.card_type
+    }
+}
+
+
+fn can_place_cell(grid: &[Vec<char>], row: usize, col: usize, width: usize, height: usize) -> bool {
+    for r in row..row + height {
+        for c in col..col + width {
+            if r >= grid.len() || c >= grid[0].len() || grid[r][c] != ' ' {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+fn place_cell(grid: &mut [Vec<char>], row: usize, col: usize, width: usize, height: usize, char: char) {
+    for r in row..row + height {
+        for c in col..col + width {
+            grid[r][c] = char;
+        }
+    }
+}
+
+fn try_place_cell(grid: &mut [Vec<char>], width: usize, height: usize, char: char, start_row: usize) -> (usize, usize) {
+    for row in start_row..grid.len() {
+        for col in 0..=grid[0].len() - width {
+            if can_place_cell(grid, row, col, width, height) {
+                place_cell(grid, row, col, width, height, char);
+                return (row, col);
+            }
+        }
+    }
+    (start_row, 999)
+}
+
+fn add_cell(grid: &mut [Vec<char>], cell_shape: &str, cell_type: &str, cell_char: char, start_row: usize) -> CellSize {
+    let (num1, num2) = cell_shape.split_once('x').unwrap();
+    let num1: usize = num1.parse().unwrap();
+    let num2: usize = num2.parse().unwrap();
+    let (start_row, start_col) = try_place_cell(grid, num2, num1, cell_char, start_row);
+    CellSize {
+        start_row,
+        start_col,
+        width: num2,
+        height: num1,
+        card_type: cell_type.to_string(),
     }
 }
