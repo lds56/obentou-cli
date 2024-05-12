@@ -90,7 +90,7 @@ impl App {
 
     fn render(&mut self, terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> Result<()> {
 
-        let titles = &mut self.data.cards;
+        // let titles = &mut self.data.cards;
         // let contents = &mut self.data.contents;
 
         terminal.draw(|f| {
@@ -106,7 +106,7 @@ impl App {
                 .split(size);
 
             // 第一列：标题列表
-            let titles_list = titles
+            let titles_list = self.data.cards
                 .iter()
                 .enumerate()
                 .map(|(i, title)| {
@@ -192,11 +192,11 @@ impl App {
                     let gap_x = 5.0;
                     let gap_y = 5.0;
 
-                    write_info!(format!("cell list: {:?}", &titles[1..]));
+                    // write_info!(format!("cell list: {:?}", &self.data.cards[1..]));
 
-                    let cell_size_list: Vec<CellSize> = arrange_grid((50, 8), &titles[1..]);
+                    let cell_size_list: Vec<CellSize> = arrange_grid((50, 8), &self.data.cards[1..]);
 
-                    write_info!(format!("cell size list: {:?}", cell_size_list));
+                    // write_info!(format!("cell size list: {:?}", cell_size_list));
 
                     for (i, cell_size) in cell_size_list.iter().enumerate() {
                         let x = start_x + (cell_size.get_start_col() * 20) as f64 + gap_x;
@@ -234,7 +234,7 @@ impl App {
             // 底部状态栏
             let status_bar_text = match self.tui_state {
                 TuiState::Edit(_) => "Shortcuts: Go Back(Esc)",
-                TuiState::Select(_) => "Shortcuts: Move Cursor(↑↓) Select(↵) Create New(N) Delete(D) Quit(Q)",
+                TuiState::Select(_) => "Shortcuts: Move Cursor(↑↓) Select(↵) Move Card(JK) Create New(N) Delete(D) Quit(Q)",
                 TuiState::Create(_, _, _) => "Shortcuts: Move Cursor(↑↓) Confirm Create(↵) Cancel(Esc)",
                 TuiState::Delete(_) => "Shortcuts: Confirm Delete(↵) Cancel(Esc)",
                 TuiState::Quit => "Bye~"
@@ -324,8 +324,8 @@ impl App {
         match self.tui_state {
             TuiState::Edit(selected_index) => self.edit_mode(key_event, selected_index),
             TuiState::Select(selected_index) => self.select_mode(key_event, selected_index),
-            TuiState::Create(selected_index, card_index, shape_index) =>
-                self.create_mode(key_event,  selected_index, card_index, shape_index),
+            TuiState::Create(selected_index, card_index, shape_index) => self.create_mode(
+                key_event, selected_index, card_index, shape_index),
             TuiState::Delete(selected_index) => self.delete_mode(key_event, selected_index),
             _ => Ok(()),
         }
@@ -391,6 +391,7 @@ impl App {
     }
 
     fn select_mode(&mut self, key_event: KeyEvent, selected_index: usize) -> Result<()> {
+        write_info!(format!("select: {}", selected_index));
         match key_event.code {
             KeyCode::Char('q') | KeyCode::Char('Q') => {
                 self.tui_state = TuiState::Quit;
@@ -401,6 +402,20 @@ impl App {
             KeyCode::Char('d') | KeyCode::Char('D') => {
                 if selected_index != 0 {
                     self.tui_state = TuiState::Delete(selected_index);
+                }
+            }
+            KeyCode::Char('j') | KeyCode::Char('J') => {
+                if selected_index < self.data.cards.len() - 1 {
+                    self.data.cards.swap(selected_index, selected_index+1);
+                    self.data.contents.swap(selected_index, selected_index+1);
+                    self.tui_state = TuiState::Select(selected_index+1);
+                }
+            }
+            KeyCode::Char('k') | KeyCode::Char('K') => {
+                if selected_index > 0 {
+                    self.data.cards.swap(selected_index, selected_index-1);
+                    self.data.contents.swap(selected_index, selected_index-1);
+                    self.tui_state = TuiState::Select(selected_index-1);
                 }
             }
             KeyCode::Enter => {
@@ -426,19 +441,27 @@ impl App {
     }
 
     fn create_mode(&mut self, key_event: KeyEvent, selected_index: usize, card_index: usize, shape_index: usize) -> Result<()> {
+        write_info!(format!("create: {}", selected_index));
         match key_event.code {
             KeyCode::Enter => {
-                if shape_index == 999 {
+                if shape_index == 999 && card_index != 0 {
                     self.tui_state = TuiState::Create(selected_index, card_index, 0);
                 } else {
                     if let Some(card) = create_card(card_index) {
+                        // insert new card to contents
                         self.data.contents.insert(selected_index + 1, card);
-                        let title_str = format!("{}-{}", constants::CARDS[card_index], constants::SHAPES[shape_index]);
+                        write_info!(format!("create - idx: {}", selected_index+1));
+                        
+                        // insert new title to titles
+                        let card_shape = if card_index == 0 { "1x8" } else { constants::SHAPES[shape_index] };
+                        let title_str = format!("{}-{}", constants::CARDS[card_index], card_shape);
                         self.data.cards.insert(selected_index + 1, title_str);
+
                         self.tui_state = TuiState::Edit(selected_index + 1);
                         self.text_area = TextArea::new(self.data.contents[selected_index + 1].clone());
                     }
                 }
+
             }
             KeyCode::Esc => {
                 self.tui_state = TuiState::Select(selected_index);
@@ -446,22 +469,22 @@ impl App {
             KeyCode::Up => {
                 if shape_index == 999 {
                     if card_index > 0 {
-                        self.tui_state = TuiState::Create(0, card_index - 1, 999);
+                        self.tui_state = TuiState::Create(selected_index, card_index - 1, 999);
                     }
                 } else {
                     if shape_index > 0 {
-                        self.tui_state = TuiState::Create(0, card_index, shape_index - 1);
+                        self.tui_state = TuiState::Create(selected_index, card_index, shape_index - 1);
                     }
                 }
             }
             KeyCode::Down => {
                 if shape_index == 999 {
                     if card_index < constants::CARDS.len() - 1 {
-                        self.tui_state = TuiState::Create(0, card_index + 1, 999);
+                        self.tui_state = TuiState::Create(selected_index, card_index + 1, 999);
                     }
                 } else {
                     if shape_index < constants::SHAPES.len() - 1 {
-                        self.tui_state = TuiState::Create(0, card_index, shape_index + 1);
+                        self.tui_state = TuiState::Create(selected_index, card_index, shape_index + 1);
                     }
                 }
             }

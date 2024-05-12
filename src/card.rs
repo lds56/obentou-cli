@@ -8,7 +8,7 @@ pub mod constants {
     use ratatui::style::Color;
 
     pub static CARDS: &'static [&str] = &["Section", "Note", "Social", "Link", "Photo", "Album", "Counter", "Map"];
-    pub static SHAPES: &'static [&str] = &["4x4", "4x2", "2x4", "2x2", "1x4"];
+    pub static SHAPES:&'static [&str] = &["4x4", "4x2", "2x4", "2x2", "1x4"];
 
     // Grayscale
     pub static _COLORS: &[Color] = &[
