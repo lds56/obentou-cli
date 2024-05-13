@@ -18,7 +18,7 @@ use std::io;
 use std::io::Write;
 use std::fs::OpenOptions;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 use crate::write_info;
 
@@ -225,7 +225,7 @@ impl App {
             // 底部状态栏
             let status_bar_text = match self.tui_state {
                 TuiState::Edit(_) => "Shortcuts: Go Back(Esc)",
-                TuiState::Select(_) => "Shortcuts: Move Cursor(↑↓) Select(↵) Move Card(JK) Create New(N) Delete(D) Quit(Q)",
+                TuiState::Select(_) => "Shortcuts: Move Cursor(↑↓) Select(↵) Move Card(JK) Reshape Card(R) Create New(N) Delete(D) Quit(Q)",
                 TuiState::Create(_, _, _) => "Shortcuts: Move Cursor(↑↓) Confirm Create(↵) Cancel(Esc)",
                 TuiState::Delete(_) => "Shortcuts: Confirm Delete(↵) Cancel(Esc)",
                 TuiState::Quit => "Bye~"
@@ -407,6 +407,16 @@ impl App {
                     self.data.cards.swap(selected_index, selected_index-1);
                     self.data.contents.swap(selected_index, selected_index-1);
                     self.tui_state = TuiState::Select(selected_index-1);
+                }
+            }
+            KeyCode::Char('r') | KeyCode::Char('R') => {
+                let title = &self.data.cards[selected_index];
+                let (card, shape) = title.split_once('-').context("Invalid title")?;
+                if card != "Section" {
+                    let mut shape_index = self.config.get_shape_index(shape);
+                    shape_index = (shape_index + 1) % self.config.get_shapes_size();
+                    let new_shape = self.config.get_shape(shape_index);
+                    self.data.cards[selected_index] = format!("{}-{}", card, new_shape);
                 }
             }
             KeyCode::Enter => {

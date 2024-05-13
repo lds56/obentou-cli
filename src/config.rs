@@ -119,6 +119,14 @@ impl Config {
         }
     }
 
+    pub fn get_shape_index(&self, shape: &str) -> usize {
+        if let Some(index) = self.shapes.iter().position(|x| *x == shape) {
+            index
+        } else {
+            0
+        }
+    }
+
     pub fn create_card(&self, card_index: usize) -> Vec<String> {
         let card = &self.cards[card_index];
         let fields = &self.fields[card];
