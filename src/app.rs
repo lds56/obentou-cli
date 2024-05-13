@@ -2,11 +2,9 @@ use crate::data::{
     Data, save_data_to_file, parse_data_from_file,
     format_json
 };
-use crate::card::{
-    Card, get_card_color, create_card,
-    constants
-};
+use crate::card::Card;
 use crate::arrange::{CellSize, arrange_grid};
+use crate::config::Config;
 
 use crossterm::{
     event::{self, Event, KeyCode, KeyEvent},
@@ -22,22 +20,11 @@ use std::fs::OpenOptions;
 
 use anyhow::Result;
 
-
-macro_rules! write_info {
-    ($content:expr) => {{
-        let mut file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .append(true)
-            .open("log.txt")
-            .expect("Failed to open file");
-
-        writeln!(file, "{}", $content).expect("Failed to write to file");
-    }};
-}
+use crate::write_info;
 
 pub struct App {
     data: Data,
+    config: Config,
     tui_state: TuiState,
     oops_count: usize,
     text_area: TextArea<'static>,
@@ -63,8 +50,11 @@ impl App {
         let oops_count = 0;
         let text_area = TextArea::new(data.contents[0].clone());
 
+        let config = Config::new("metadata.toml")?;
+
         Ok(Self {
             data,
+            config,
             tui_state,
             oops_count,
             text_area,
@@ -72,6 +62,7 @@ impl App {
     }
 
     pub fn run(&mut self) -> Result<()> {
+
         // Setup terminal
         enable_raw_mode()?;
         let mut stdout = io::stdout();
@@ -111,7 +102,7 @@ impl App {
                 .enumerate()
                 .map(|(i, title)| {
                     let original_title = if let Some((trimmed, _)) = title.split_once('-') { trimmed } else { title };
-                    let mut style = Style::default().fg(get_card_color(original_title));
+                    let mut style = Style::default().fg(self.config.get_card_color(original_title));
 
                     if let TuiState::Select(selected_index) = self.tui_state {
                         if i == selected_index {
@@ -211,7 +202,7 @@ impl App {
                                 width: w,
                                 height: h,
                                 color: if i+1 != selected_index {
-                                    get_card_color(cell_size.get_card_type())
+                                    self.config.get_card_color(cell_size.get_card_type())
                                 } else {
                                     Color::Yellow
                                 },
@@ -260,7 +251,7 @@ impl App {
                     .border_style(Style::default().fg(Color::Cyan));
 
                 let items: Vec<ListItem> = if shape_index == 999 {
-                    constants::CARDS
+                    self.config.get_cards()
                     .iter()
                     .enumerate()
                     .map(|(i, option)| {
@@ -269,11 +260,11 @@ impl App {
                         } else {
                             Style::default().fg(Color::White)
                         };
-                        ListItem::new(Span::styled(*option, style))
+                        ListItem::new(Span::styled(option, style))
                     })
                     .collect()
                 } else {
-                    constants::SHAPES
+                    self.config.get_shapes()
                     .iter()
                     .enumerate()
                     .map(|(i, option)| {
@@ -282,7 +273,7 @@ impl App {
                         } else {
                             Style::default().fg(Color::White)
                         };
-                        ListItem::new(Span::styled(*option, style))
+                        ListItem::new(Span::styled(option, style))
                     })
                     .collect()
                 };
@@ -447,19 +438,18 @@ impl App {
                 if shape_index == 999 && card_index != 0 {
                     self.tui_state = TuiState::Create(selected_index, card_index, 0);
                 } else {
-                    if let Some(card) = create_card(card_index) {
-                        // insert new card to contents
-                        self.data.contents.insert(selected_index + 1, card);
-                        write_info!(format!("create - idx: {}", selected_index+1));
-                        
-                        // insert new title to titles
-                        let card_shape = if card_index == 0 { "1x8" } else { constants::SHAPES[shape_index] };
-                        let title_str = format!("{}-{}", constants::CARDS[card_index], card_shape);
-                        self.data.cards.insert(selected_index + 1, title_str);
 
-                        self.tui_state = TuiState::Edit(selected_index + 1);
-                        self.text_area = TextArea::new(self.data.contents[selected_index + 1].clone());
-                    }
+                    // insert new card to contents
+                    self.data.contents.insert(selected_index + 1, self.config.create_card(card_index));
+                    write_info!(format!("create - idx: {}", selected_index+1));
+
+                    // insert new title to titles
+                    let card_shape = if card_index == 0 { "1x8" } else { self.config.get_shape(shape_index) };
+                    let title_str = format!("{}-{}", self.config.get_card(card_index), card_shape);
+                    self.data.cards.insert(selected_index + 1, title_str);
+
+                    self.tui_state = TuiState::Edit(selected_index + 1);
+                    self.text_area = TextArea::new(self.data.contents[selected_index + 1].clone());
                 }
 
             }
@@ -479,11 +469,11 @@ impl App {
             }
             KeyCode::Down => {
                 if shape_index == 999 {
-                    if card_index < constants::CARDS.len() - 1 {
+                    if card_index < self.config.get_cards_size() - 1 {
                         self.tui_state = TuiState::Create(selected_index, card_index + 1, 999);
                     }
                 } else {
-                    if shape_index < constants::SHAPES.len() - 1 {
+                    if shape_index < self.config.get_shapes_size() - 1 {
                         self.tui_state = TuiState::Create(selected_index, card_index, shape_index + 1);
                     }
                 }
@@ -496,9 +486,12 @@ impl App {
     fn delete_mode(&mut self, key_event: KeyEvent, selected_index: usize) -> Result<()> {
         match key_event.code {
             KeyCode::Enter => {
-                self.data.contents.remove(selected_index);
-                self.data.cards.remove(selected_index);
-                self.tui_state = TuiState::Select(selected_index - 1);
+                if selected_index != 0 {
+                    self.data.contents.remove(selected_index);
+                    self.data.cards.remove(selected_index);
+                    self.tui_state = TuiState::Select(selected_index - 1);
+                    self.text_area = TextArea::new(self.data.contents[selected_index - 1].clone());
+                }
             }
             KeyCode::Esc => {
                 self.tui_state = TuiState::Select(selected_index);

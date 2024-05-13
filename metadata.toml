@@ -1,0 +1,18 @@
+[Cards]
+types = ["Section", "Note", "Social", "Link", "Photo", "Album", "Counter", "Map"]
+shapes = ["4x4", "4x2", "2x4", "2x2", "1x4"]
+
+[Cards.Fields]
+Section = ["title", "subtitle?"]
+Note = ["title", "content", "bgColor?", "textColor?"]
+Social = ["platform", "userId", "content"]
+Link = ["title", "url", "textColor?"]
+Photo = ["title?", "content?", "imgUrl"]
+Album = ["imgs"]
+Counter = ["title", "datetime", "bgColor?", "textColor?"]
+Map = ["content", "address", "zoom", "textColor?"]
+
+[Themes]
+grayscale = [255, 252, 249, 246, 243, 240, 237, 231]
+mondrian = [220, 27, 16, 124, 255, 220, 27, 124]
+soft = [175, 104, 116, 115, 150, 186, 180, 174]

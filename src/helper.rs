@@ -1,4 +1,4 @@
-macro_rules! write_info {
+pub macro_rules! write_info {
     ($content:expr) => {{
         let mut file = OpenOptions::new()
             .create(true)

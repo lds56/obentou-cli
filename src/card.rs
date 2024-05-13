@@ -3,50 +3,6 @@ use ratatui::{
     widgets::canvas::{Painter, Shape, Line},
 };
 
-pub mod constants {
-
-    use ratatui::style::Color;
-
-    pub static CARDS: &'static [&str] = &["Section", "Note", "Social", "Link", "Photo", "Album", "Counter", "Map"];
-    pub static SHAPES:&'static [&str] = &["4x4", "4x2", "2x4", "2x2", "1x4"];
-
-    // Grayscale
-    pub static _COLORS: &[Color] = &[
-        Color::Indexed(255),  // red
-        Color::Indexed(252),  // pink
-        Color::Indexed(249),  // orange
-        Color::Indexed(246),   // blue
-        Color::Indexed(243),   // cyan
-        Color::Indexed(240),   // green
-        Color::Indexed(237),   // dark green
-        Color::Indexed(231),  // light yellow
-    ];
-
-    // Mondrian
-    pub static MOND_COLORS: &[Color] = &[
-        Color::Indexed(220),  // yellow
-        Color::Indexed(027),  // blue
-        Color::Indexed(016),  // gray
-        Color::Indexed(124),  // red
-        Color::Indexed(255),  // white
-        Color::Indexed(220),  // yellow
-        Color::Indexed(027),  // blue
-        Color::Indexed(124),  // red
-    ];
-
-    // Soft
-    pub static _SOFT_COLORS: &[Color] = &[
-        Color::Indexed(175),
-        Color::Indexed(104),
-        Color::Indexed(116),
-        Color::Indexed(115),
-        Color::Indexed(150),
-        Color::Indexed(186),
-        Color::Indexed(180),
-        Color::Indexed(174),
-    ];
-}
-
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct Card {
     /// The `x` position of the card.
@@ -92,21 +48,3 @@ impl Shape for Card {
 
     }
 }
-
-
-pub fn get_card_color(card: &str) -> Color {
-    if let Some(index) = constants::CARDS.iter().position(|x| *x == card) {
-        constants::MOND_COLORS[index]
-    } else {
-        Color::Gray
-    }
-}
-
-
-pub fn create_card(card_index: usize) -> Option<Vec<String>> {
-    if card_index >= constants::CARDS.len() {
-        return None;
-    }
-    Some(vec!["{}".to_string()])
-}
-
