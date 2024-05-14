@@ -1,6 +1,5 @@
 use crate::data::{
-    Data, save_data_to_file, parse_data_from_file,
-    format_json
+    Data, save_data_to_file, parse_data_from_file
 };
 use crate::card::Card;
 use crate::arrange::{CellSize, arrange_grid};
@@ -18,7 +17,7 @@ use std::io;
 use std::io::Write;
 use std::fs::OpenOptions;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 
 use crate::write_info;
 
@@ -26,6 +25,7 @@ pub struct App {
     data: Data,
     config: Config,
     tui_state: TuiState,
+    message: String,
     oops_count: usize,
     text_area: TextArea<'static>,
 }
@@ -40,22 +40,25 @@ enum TuiState {
 
 impl App {
     pub fn new(filename: String) -> Result<Self> {
-        let data = if !filename.is_empty() {
+        let items = if !filename.is_empty() {
             parse_data_from_file(&filename)?
         } else {
-            Data::default()
+            vec![]
         };
 
         let tui_state = TuiState::Select(0);
+        let message = "ok".to_string();
         let oops_count = 0;
-        let text_area = TextArea::new(data.contents[0].clone());
+        let text_area = TextArea::new(items.get(0).context("Empty data")?.get_lines().to_vec());
 
-        let config = Config::new("metadata.toml")?;
+        let config = Config::load("metadata.toml")?;
+        let data = Data{ metadata: config.get_metadata().clone(), items };
 
         Ok(Self {
             data,
             config,
             tui_state,
+            message,
             oops_count,
             text_area,
         })
@@ -97,12 +100,12 @@ impl App {
                 .split(size);
 
             // 第一列：标题列表
-            let titles_list = self.data.cards
+            let titles_list = self.data.items
                 .iter()
                 .enumerate()
-                .map(|(i, title)| {
-                    let original_title = if let Some((trimmed, _)) = title.split_once('-') { trimmed } else { title };
-                    let mut style = Style::default().fg(self.config.get_card_color(original_title));
+                .map(|(i, item)| {
+                    
+                    let mut style = Style::default().fg(*self.data.metadata.get_card_color(&item.get_title()));
 
                     if let TuiState::Select(selected_index) = self.tui_state {
                         if i == selected_index {
@@ -110,10 +113,14 @@ impl App {
                         }
                     }
 
-
                     let prefix = if i == 0 { ">".to_string() } else { format!("{}.", i) };
+                    let title_and_shape = if i == 0 {
+                        item.get_title().to_string()
+                    } else {
+                        format!("{}-{}", item.get_title(), item.get_shape())
+                    };
                     ListItem::new(Span::styled(String::from(
-                        format!("{} {}", prefix, title)
+                        format!("{} {}", prefix, title_and_shape)
                     ), style))
                 })
                 .collect::<Vec<_>>();
@@ -134,16 +141,27 @@ impl App {
             // 第二列：内容编辑器
             let mut editor_title = String::from("Edit");
             let mut editor_style = Style::default();
-            if let TuiState::Edit(_) = self.tui_state {
-                let json_valid = self.text_area.lines().join("\n").is_valid_json();
-                if json_valid {
-                    self.oops_count = 0;
-                    editor_title = String::from("OK");
-                    editor_style = Style::default().fg(Color::Green);
-                } else {
-                    let ooo = "o".repeat(self.oops_count);
-                    editor_title = format!("O{ooo}ps! Invalid JSON");
-                    editor_style = Style::default().fg(Color::Red);
+
+            if let TuiState::Edit(selected_index) = self.tui_state {
+
+                let title = self.data.items
+                                .get(selected_index).expect("Item not found!")
+                                .get_title();
+                
+                let json_str = self.text_area.lines().join("\n");
+                let is_valid = self.data.metadata.is_valid(&json_str, title);
+
+                match is_valid {
+                    Ok(()) => {
+                        self.oops_count = 0;
+                        editor_title = String::from("OK");
+                        editor_style = Style::default().fg(Color::Green);
+                    }
+                    Err(msg) => {
+                        let ooo = "o".repeat(self.oops_count);
+                        editor_title = format!("O{ooo}ps! {msg}");
+                        editor_style = Style::default().fg(Color::Red);
+                    }
                 }
             }
 
@@ -185,7 +203,13 @@ impl App {
 
                     // write_info!(format!("cell list: {:?}", &self.data.cards[1..]));
 
-                    let cell_size_list: Vec<CellSize> = arrange_grid((50, 8), &self.data.cards[1..]);
+                    let main_cards: Vec<String> = self.data.items
+                                              .iter()
+                                              .skip(1)
+                                              .map(|item| format!("{}-{}", item.get_title(), item.get_shape()))
+                                              .collect();
+
+                    let cell_size_list: Vec<CellSize> = arrange_grid((50, 8), &main_cards);
 
                     // write_info!(format!("cell size list: {:?}", cell_size_list));
 
@@ -202,7 +226,7 @@ impl App {
                                 width: w,
                                 height: h,
                                 color: if i+1 != selected_index {
-                                    self.config.get_card_color(cell_size.get_card_type())
+                                    *self.data.metadata.get_card_color(cell_size.get_card_type())
                                 } else {
                                     Color::Yellow
                                 },
@@ -251,7 +275,7 @@ impl App {
                     .border_style(Style::default().fg(Color::Cyan));
 
                 let items: Vec<ListItem> = if shape_index == 999 {
-                    self.config.get_cards()
+                    self.data.metadata.get_cards()
                     .iter()
                     .enumerate()
                     .map(|(i, option)| {
@@ -264,7 +288,7 @@ impl App {
                     })
                     .collect()
                 } else {
-                    self.config.get_shapes()
+                    self.data.metadata.get_shapes()
                     .iter()
                     .enumerate()
                     .map(|(i, option)| {
@@ -365,13 +389,27 @@ impl App {
     fn edit_mode(&mut self, key_event: KeyEvent, selected_index: usize) -> Result<()> {
         match key_event.code {
             KeyCode::Esc => {
-                let json_valid = self.text_area.lines().join("\n").is_valid_json();
-                if json_valid {
-                    self.tui_state = TuiState::Select(selected_index);
-                    self.data.contents[selected_index] =
-                        format_json(self.text_area.lines().join("\n").as_str());
-                } else {
-                    self.oops_count += 1;
+
+                let title = self.data.items
+                                .get(selected_index).context("Index out of bound")?
+                                .get_title();                
+                write_info!(format!("Edit {}...", title));
+
+                let json_str = self.text_area.lines().join("\n");
+                let is_valid = self.data.metadata.is_valid(&json_str, title);
+                write_info!(format!("edit is valid? {:?}", is_valid));
+                
+                match is_valid {
+                    Ok(()) => {
+                        self.oops_count = 0;
+                        self.tui_state = TuiState::Select(selected_index);
+                        self.data.items.get_mut(selected_index).context("No item found!")?
+                                       .set_lines_and_format(self.text_area.lines());
+                    }
+                    Err(_) => {
+                        // self.message = msg.to_string();
+                        self.oops_count += 1;
+                    }
                 }
             }
             _ => {
@@ -382,7 +420,7 @@ impl App {
     }
 
     fn select_mode(&mut self, key_event: KeyEvent, selected_index: usize) -> Result<()> {
-        write_info!(format!("select: {}", selected_index));
+        write_info!(format!("> Select - index: {}", selected_index));
         match key_event.code {
             KeyCode::Char('q') | KeyCode::Char('Q') => {
                 self.tui_state = TuiState::Quit;
@@ -396,44 +434,48 @@ impl App {
                 }
             }
             KeyCode::Char('j') | KeyCode::Char('J') => {
-                if selected_index < self.data.cards.len() - 1 {
-                    self.data.cards.swap(selected_index, selected_index+1);
-                    self.data.contents.swap(selected_index, selected_index+1);
+                if selected_index < self.data.items.len() - 1 {
+                    self.data.items.swap(selected_index, selected_index+1);
                     self.tui_state = TuiState::Select(selected_index+1);
                 }
             }
             KeyCode::Char('k') | KeyCode::Char('K') => {
                 if selected_index > 0 {
-                    self.data.cards.swap(selected_index, selected_index-1);
-                    self.data.contents.swap(selected_index, selected_index-1);
+                    self.data.items.swap(selected_index, selected_index-1);
                     self.tui_state = TuiState::Select(selected_index-1);
                 }
             }
             KeyCode::Char('r') | KeyCode::Char('R') => {
-                let title = &self.data.cards[selected_index];
-                let (card, shape) = title.split_once('-').context("Invalid title")?;
-                if card != "Section" {
-                    let mut shape_index = self.config.get_shape_index(shape);
-                    shape_index = (shape_index + 1) % self.config.get_shapes_size();
-                    let new_shape = self.config.get_shape(shape_index);
-                    self.data.cards[selected_index] = format!("{}-{}", card, new_shape);
+                let item = self.data.items.get_mut(selected_index).context("No item found!")?;
+
+                if item.get_title() != "Section" {
+
+                    let mut shape_index = self.data.metadata.index_of_shape(item.get_shape());
+                    shape_index = (shape_index + 1) % self.data.metadata.count_shapes();
+
+                    let new_shape = self.data.metadata.get_shape(shape_index).context("No item shape found!")?;
+                    item.set_shape(new_shape.to_string());
+                    write_info!(format!("> Reshape - {}-{}", item.get_title(), item.get_shape()));
                 }
             }
             KeyCode::Enter => {
                 self.tui_state = TuiState::Edit(selected_index);
                 self.oops_count = 0;
-                self.text_area = TextArea::new(self.data.contents[selected_index].clone());
+                self.text_area = TextArea::new(
+                    self.data.items[selected_index].get_lines().to_vec());
             }
             KeyCode::Up => {
                 if selected_index > 0 {
                     self.tui_state = TuiState::Select(selected_index - 1);
-                    self.text_area = TextArea::new(self.data.contents[selected_index - 1].clone());
+                    self.text_area = TextArea::new(
+                        self.data.items[selected_index - 1].get_lines().to_vec());
                 }
             }
             KeyCode::Down => {
-                if selected_index < self.data.cards.len() - 1 {
+                if selected_index < self.data.items.len() - 1 {
                     self.tui_state = TuiState::Select(selected_index + 1);
-                    self.text_area = TextArea::new(self.data.contents[selected_index + 1].clone());
+                    self.text_area = TextArea::new(
+                        self.data.items[selected_index + 1].get_lines().to_vec());
                 }
             }
             _ => (),
@@ -449,17 +491,16 @@ impl App {
                     self.tui_state = TuiState::Create(selected_index, card_index, 0);
                 } else {
 
-                    // insert new card to contents
-                    self.data.contents.insert(selected_index + 1, self.config.create_card(card_index));
+                    // create new item
+                    let new_item = self.data.metadata.create_item(card_index, shape_index).context("Failed to create new item")?;
+
+                    // insert to data
+                    self.data.items.insert(selected_index + 1, new_item);
                     write_info!(format!("create - idx: {}", selected_index+1));
 
-                    // insert new title to titles
-                    let card_shape = if card_index == 0 { "1x8" } else { self.config.get_shape(shape_index) };
-                    let title_str = format!("{}-{}", self.config.get_card(card_index), card_shape);
-                    self.data.cards.insert(selected_index + 1, title_str);
-
                     self.tui_state = TuiState::Edit(selected_index + 1);
-                    self.text_area = TextArea::new(self.data.contents[selected_index + 1].clone());
+                    self.text_area = TextArea::new(
+                        self.data.items[selected_index + 1].get_lines().to_vec());
                 }
 
             }
@@ -479,11 +520,11 @@ impl App {
             }
             KeyCode::Down => {
                 if shape_index == 999 {
-                    if card_index < self.config.get_cards_size() - 1 {
+                    if card_index < self.data.items.len() - 1 {
                         self.tui_state = TuiState::Create(selected_index, card_index + 1, 999);
                     }
                 } else {
-                    if shape_index < self.config.get_shapes_size() - 1 {
+                    if shape_index < self.data.metadata.count_shapes() - 1 {
                         self.tui_state = TuiState::Create(selected_index, card_index, shape_index + 1);
                     }
                 }
@@ -497,10 +538,12 @@ impl App {
         match key_event.code {
             KeyCode::Enter => {
                 if selected_index != 0 {
-                    self.data.contents.remove(selected_index);
-                    self.data.cards.remove(selected_index);
+                    // remove deleted item
+                    self.data.items.remove(selected_index);
+
                     self.tui_state = TuiState::Select(selected_index - 1);
-                    self.text_area = TextArea::new(self.data.contents[selected_index - 1].clone());
+                    self.text_area = TextArea::new(
+                        self.data.items[selected_index - 1].get_lines().to_vec());
                 }
             }
             KeyCode::Esc => {

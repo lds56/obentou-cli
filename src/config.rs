@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use std::collections::HashMap;
 use toml;
 
@@ -10,16 +10,15 @@ use std::io::Write;
 
 use crate::write_info;
 
+use crate::data::MetaData;
+
 // Define a struct to hold the configuration data
 pub struct Config {
-    cards: Vec<String>,
-    shapes: Vec<String>,
-    fields: HashMap<String, Vec<String>>,
-    themes: HashMap<String, Vec<Color>>,
+    metadata: MetaData,
 }
 
 impl Config {
-    pub fn new(filename: &str) -> Result<Config> {
+    pub fn load(filename: &str) -> Result<Config> {
         let metadata = std::fs::read_to_string(filename)
             .with_context(|| "Failed to read config file")?;
         let parsed: toml::Value = toml::from_str(&metadata)
@@ -62,85 +61,30 @@ impl Config {
             themes.insert(key.to_string(), theme_colors);
         }
 
-        Ok(Config {
+        let chosen_theme = themes.get("mondrian").context("No such a theme")?.clone();
+        let theme: HashMap<String, Color> = cards.clone().into_iter()
+                                                 .zip(chosen_theme.into_iter())
+                                                 .collect();
+
+        /*let metadata = MetaData {
             cards,
             shapes,
             fields,
-            themes,
+        };*/
+
+        Ok(Config {
+            metadata: MetaData::new(
+                cards,
+                shapes,
+                fields,
+                theme,
+            )
         })
+
     }
 
-
-    pub fn get_cards(&self) -> &Vec<String> {
-        &self.cards
-    }
-
-    pub fn get_shapes(&self) -> &Vec<String> {
-        &self.shapes
-    }
-
-    pub fn get_fields(&self) -> &HashMap<String, Vec<String>> {
-        &self.fields
-    }
-
-    pub fn get_themes(&self) -> &HashMap<String, Vec<Color>> {
-        &self.themes
-    }
-
-    
-    pub fn get_chosen_theme(&self) -> &Vec<Color> {
-        self.themes.get("mondrian").unwrap()
-            // .unwrap_or(&vec![Color::Gray; 10])
-            // .to_vec()
-}
-
-    pub fn get_shape(&self, idx: usize) -> &str {
-        self.shapes.get(idx).unwrap() //_or(&"2x2".to_string()).to_string()
-    }
-
-    pub fn get_card(&self, idx: usize) -> &str {
-        self.cards.get(idx).unwrap() // _or(&"Note".to_string()).to_string()
-    }
-
-    pub fn get_shapes_size(&self) -> usize {
-        self.shapes.len()
-    }
-
-    pub fn get_cards_size(&self) -> usize {
-        self.cards.len()
-    }
-
-    pub fn get_card_color(&self, card: &str) -> Color {
-        if let Some(index) = self.cards.iter().position(|x| *x == card) {
-            self.get_chosen_theme()[index]
-        }
-        else {
-            Color::Gray
-        }
-    }
-
-    pub fn get_shape_index(&self, shape: &str) -> usize {
-        if let Some(index) = self.shapes.iter().position(|x| *x == shape) {
-            index
-        } else {
-            0
-        }
-    }
-
-    pub fn create_card(&self, card_index: usize) -> Vec<String> {
-        let card = &self.cards[card_index];
-        let fields = &self.fields[card];
-        let mut strs = vec!["{".to_string()];
-        for (index, field) in fields.iter().enumerate() {
-            strs.push(format!("    \"{}\": \"\"{}", field,
-                              if index == fields.len() - 1 { "" } else { "," })
-            );
-        }
-        strs.push("}".to_string());
-        // for s in &strs {
-           // write_info!(s);
-        // }
-        strs
+    pub fn get_metadata(&self) -> &MetaData {
+        &self.metadata
     }
 }
 // fn main() -> Result<()> {
