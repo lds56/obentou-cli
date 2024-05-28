@@ -1,9 +1,7 @@
-use crate::data::{
-    Data, save_data_to_file, parse_data_from_file
-};
+use crate::arrange::{arrange_grid, CellSize};
 use crate::card::Card;
-use crate::arrange::{CellSize, arrange_grid};
 use crate::config::Config;
+use crate::data::{parse_data_from_file, save_data_to_file, Data};
 
 use crossterm::{
     event::{self, Event, KeyCode, KeyEvent},
@@ -13,11 +11,11 @@ use ratatui::prelude::*;
 use ratatui::widgets::{canvas::*, *};
 use tui_textarea::TextArea;
 
+use std::fs::OpenOptions;
 use std::io;
 use std::io::Write;
-use std::fs::OpenOptions;
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result};
 
 use crate::write_info;
 
@@ -28,6 +26,7 @@ pub struct App {
     message: String,
     oops_count: usize,
     text_area: TextArea<'static>,
+    source_file: String,
 }
 
 enum TuiState {
@@ -52,7 +51,12 @@ impl App {
         let text_area = TextArea::new(items.get(0).context("Empty data")?.get_lines().to_vec());
 
         let config = Config::load("metadata.toml")?;
-        let data = Data{ metadata: config.get_metadata().clone(), items };
+        let data = Data {
+            metadata: config.get_metadata().clone(),
+            items,
+        };
+
+        write_info!("Initialize app...");
 
         Ok(Self {
             data,
@@ -61,17 +65,19 @@ impl App {
             message,
             oops_count,
             text_area,
+            source_file: filename,
         })
     }
 
     pub fn run(&mut self) -> Result<()> {
-
         // Setup terminal
         enable_raw_mode()?;
         let mut stdout = io::stdout();
         crossterm::execute!(stdout, EnterAlternateScreen)?;
         let backend = CrosstermBackend::new(stdout);
         let mut terminal = Terminal::new(backend)?;
+
+        write_info!("Start to run loop..");
 
         loop {
             if let TuiState::Quit = self.tui_state {
@@ -83,7 +89,6 @@ impl App {
     }
 
     fn render(&mut self, terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> Result<()> {
-
         // let titles = &mut self.data.cards;
         // let contents = &mut self.data.contents;
 
@@ -213,6 +218,19 @@ impl App {
 
                     // write_info!(format!("cell size list: {:?}", cell_size_list));
 
+                    let (selected_y, selected_h) = if selected_index >= 1 && selected_index-1 < cell_size_list.len() {
+                        (start_y + (cell_size_list[selected_index-1].get_start_row() * 20) as f64 + gap_y,
+                         (cell_size_list[selected_index-1].get_height() * 20) as f64 - gap_y * 2.0)
+                    } else {
+                        (0f64, 0f64)
+                    };
+
+                    let offset_y = if (max_y as f64) < selected_y + selected_h {
+                        selected_y + selected_h - max_y
+                    } else {
+                        0f64
+                    };
+
                     for (i, cell_size) in cell_size_list.iter().enumerate() {
                         let x = start_x + (cell_size.get_start_col() * 20) as f64 + gap_x;
                         let y = start_y + (cell_size.get_start_row() * 20) as f64 + gap_y;
@@ -222,7 +240,7 @@ impl App {
                         // if i+1 != selected_index {
                             ctx.draw(&Card {
                                 x,
-                                y: max_y - y - h,
+                                y: max_y - (y + h - offset_y),
                                 width: w,
                                 height: h,
                                 color: if i+1 != selected_index {
@@ -339,8 +357,9 @@ impl App {
         match self.tui_state {
             TuiState::Edit(selected_index) => self.edit_mode(key_event, selected_index),
             TuiState::Select(selected_index) => self.select_mode(key_event, selected_index),
-            TuiState::Create(selected_index, card_index, shape_index) => self.create_mode(
-                key_event, selected_index, card_index, shape_index),
+            TuiState::Create(selected_index, card_index, shape_index) => {
+                self.create_mode(key_event, selected_index, card_index, shape_index)
+            }
             TuiState::Delete(selected_index) => self.delete_mode(key_event, selected_index),
             _ => Ok(()),
         }
@@ -389,22 +408,27 @@ impl App {
     fn edit_mode(&mut self, key_event: KeyEvent, selected_index: usize) -> Result<()> {
         match key_event.code {
             KeyCode::Esc => {
-
-                let title = self.data.items
-                                .get(selected_index).context("Index out of bound")?
-                                .get_title();                
+                let title = self
+                    .data
+                    .items
+                    .get(selected_index)
+                    .context("Index out of bound")?
+                    .get_title();
                 write_info!(format!("Edit {}...", title));
 
                 let json_str = self.text_area.lines().join("\n");
                 let is_valid = self.data.metadata.is_valid(&json_str, title);
                 write_info!(format!("edit is valid? {:?}", is_valid));
-                
+
                 match is_valid {
                     Ok(()) => {
                         self.oops_count = 0;
                         self.tui_state = TuiState::Select(selected_index);
-                        self.data.items.get_mut(selected_index).context("No item found!")?
-                                       .set_lines_and_format(self.text_area.lines());
+                        self.data
+                            .items
+                            .get_mut(selected_index)
+                            .context("No item found!")?
+                            .set_lines_and_format(self.text_area.lines());
                     }
                     Err(_) => {
                         // self.message = msg.to_string();
@@ -435,47 +459,58 @@ impl App {
             }
             KeyCode::Char('j') | KeyCode::Char('J') => {
                 if selected_index < self.data.items.len() - 1 {
-                    self.data.items.swap(selected_index, selected_index+1);
-                    self.tui_state = TuiState::Select(selected_index+1);
+                    self.data.items.swap(selected_index, selected_index + 1);
+                    self.tui_state = TuiState::Select(selected_index + 1);
                 }
             }
             KeyCode::Char('k') | KeyCode::Char('K') => {
                 if selected_index > 0 {
-                    self.data.items.swap(selected_index, selected_index-1);
-                    self.tui_state = TuiState::Select(selected_index-1);
+                    self.data.items.swap(selected_index, selected_index - 1);
+                    self.tui_state = TuiState::Select(selected_index - 1);
                 }
             }
             KeyCode::Char('r') | KeyCode::Char('R') => {
-                let item = self.data.items.get_mut(selected_index).context("No item found!")?;
+                let item = self
+                    .data
+                    .items
+                    .get_mut(selected_index)
+                    .context("No item found!")?;
 
                 if item.get_title() != "Section" {
-
                     let mut shape_index = self.data.metadata.index_of_shape(item.get_shape());
                     shape_index = (shape_index + 1) % self.data.metadata.count_shapes();
 
-                    let new_shape = self.data.metadata.get_shape(shape_index).context("No item shape found!")?;
+                    let new_shape = self
+                        .data
+                        .metadata
+                        .get_shape(shape_index)
+                        .context("No item shape found!")?;
                     item.set_shape(new_shape.to_string());
-                    write_info!(format!("> Reshape - {}-{}", item.get_title(), item.get_shape()));
+                    write_info!(format!(
+                        "> Reshape - {}-{}",
+                        item.get_title(),
+                        item.get_shape()
+                    ));
                 }
             }
             KeyCode::Enter => {
                 self.tui_state = TuiState::Edit(selected_index);
                 self.oops_count = 0;
-                self.text_area = TextArea::new(
-                    self.data.items[selected_index].get_lines().to_vec());
+                self.text_area =
+                    TextArea::new(self.data.items[selected_index].get_lines().to_vec());
             }
             KeyCode::Up => {
                 if selected_index > 0 {
                     self.tui_state = TuiState::Select(selected_index - 1);
-                    self.text_area = TextArea::new(
-                        self.data.items[selected_index - 1].get_lines().to_vec());
+                    self.text_area =
+                        TextArea::new(self.data.items[selected_index - 1].get_lines().to_vec());
                 }
             }
             KeyCode::Down => {
                 if selected_index < self.data.items.len() - 1 {
                     self.tui_state = TuiState::Select(selected_index + 1);
-                    self.text_area = TextArea::new(
-                        self.data.items[selected_index + 1].get_lines().to_vec());
+                    self.text_area =
+                        TextArea::new(self.data.items[selected_index + 1].get_lines().to_vec());
                 }
             }
             _ => (),
@@ -483,26 +518,34 @@ impl App {
         Ok(())
     }
 
-    fn create_mode(&mut self, key_event: KeyEvent, selected_index: usize, card_index: usize, shape_index: usize) -> Result<()> {
+    fn create_mode(
+        &mut self,
+        key_event: KeyEvent,
+        selected_index: usize,
+        card_index: usize,
+        shape_index: usize,
+    ) -> Result<()> {
         write_info!(format!("create: {}", selected_index));
         match key_event.code {
             KeyCode::Enter => {
                 if shape_index == 999 && card_index != 0 {
                     self.tui_state = TuiState::Create(selected_index, card_index, 0);
                 } else {
-
                     // create new item
-                    let new_item = self.data.metadata.create_item(card_index, shape_index).context("Failed to create new item")?;
+                    let new_item = self
+                        .data
+                        .metadata
+                        .create_item(card_index, shape_index)
+                        .context("Failed to create new item")?;
 
                     // insert to data
                     self.data.items.insert(selected_index + 1, new_item);
-                    write_info!(format!("create - idx: {}", selected_index+1));
+                    write_info!(format!("create - idx: {}", selected_index + 1));
 
                     self.tui_state = TuiState::Edit(selected_index + 1);
-                    self.text_area = TextArea::new(
-                        self.data.items[selected_index + 1].get_lines().to_vec());
+                    self.text_area =
+                        TextArea::new(self.data.items[selected_index + 1].get_lines().to_vec());
                 }
-
             }
             KeyCode::Esc => {
                 self.tui_state = TuiState::Select(selected_index);
@@ -514,7 +557,8 @@ impl App {
                     }
                 } else {
                     if shape_index > 0 {
-                        self.tui_state = TuiState::Create(selected_index, card_index, shape_index - 1);
+                        self.tui_state =
+                            TuiState::Create(selected_index, card_index, shape_index - 1);
                     }
                 }
             }
@@ -525,7 +569,8 @@ impl App {
                     }
                 } else {
                     if shape_index < self.data.metadata.count_shapes() - 1 {
-                        self.tui_state = TuiState::Create(selected_index, card_index, shape_index + 1);
+                        self.tui_state =
+                            TuiState::Create(selected_index, card_index, shape_index + 1);
                     }
                 }
             }
@@ -542,8 +587,8 @@ impl App {
                     self.data.items.remove(selected_index);
 
                     self.tui_state = TuiState::Select(selected_index - 1);
-                    self.text_area = TextArea::new(
-                        self.data.items[selected_index - 1].get_lines().to_vec());
+                    self.text_area =
+                        TextArea::new(self.data.items[selected_index - 1].get_lines().to_vec());
                 }
             }
             KeyCode::Esc => {
@@ -581,27 +626,19 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
         .split(popup_layout[1])[1]
 }
 
-
 impl Drop for App {
     fn drop(&mut self) {
+
+        write_info!("App dropped...");
+        
         // Restore terminal
         disable_raw_mode().expect("Failed to disable raw mode");
-        crossterm::execute!(io::stdout(), LeaveAlternateScreen).expect("Failed to leave alternate screen");
+        crossterm::execute!(io::stdout(), LeaveAlternateScreen)
+            .expect("Failed to leave alternate screen");
 
         // Save data to file
-        if let Err(e) = save_data_to_file(&self.data, "output.json") {
+        if let Err(e) = save_data_to_file(&self.data, &self.source_file) {
             eprintln!("Error saving data: {}", e);
         }
-    }
-}
-
-
-trait JsonValidation {
-    fn is_valid_json(&self) -> bool;
-}
-
-impl JsonValidation for String {
-    fn is_valid_json(&self) -> bool {
-        serde_json::from_str::<serde_json::Value>(self).is_ok()
     }
 }

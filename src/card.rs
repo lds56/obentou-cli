@@ -1,6 +1,6 @@
 use ratatui::{
     style::Color,
-    widgets::canvas::{Painter, Shape, Line},
+    widgets::canvas::{Line, Painter, Shape},
 };
 
 #[derive(Debug, Default, Clone, PartialEq)]
@@ -31,7 +31,6 @@ impl Card {
 
 impl Shape for Card {
     fn draw(&self, painter: &mut Painter) {
-
         let mut lines: Vec<Line> = vec![];
         for i in 0..(self.width as usize) {
             lines.push(Line {
@@ -45,6 +44,5 @@ impl Shape for Card {
         for line in &lines {
             line.draw(painter);
         }
-
     }
 }

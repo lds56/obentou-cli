@@ -18,7 +18,7 @@ mod tests {
     fn test_arrange() {
 
         write_info!("test arrange");
-        
+
         // let cards = vec!["Link-2x2", "Map-2x4", "Counter-1x4", "Link-2x4",
            //              "Section-1x8", "Note-2x2", "Album-4x4"];
 

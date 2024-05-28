@@ -1,7 +1,7 @@
-mod data;
-mod card;
 mod arrange;
+mod card;
 mod config;
+mod data;
 
 pub mod app;
 

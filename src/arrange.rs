@@ -7,9 +7,7 @@ pub struct CellSize {
     card_type: String,
 }
 
-
 pub fn arrange_grid(grid_size: (usize, usize), cell_list: &[String]) -> Vec<CellSize> {
-
     let (grow, gcol) = grid_size;
 
     let mut grid = vec![vec![' '; gcol]; grow];
@@ -20,17 +18,19 @@ pub fn arrange_grid(grid_size: (usize, usize), cell_list: &[String]) -> Vec<Cell
     for cell in cell_list.iter() {
         let (cell_type, cell_shape) = cell.split_once('-').unwrap();
         let cell_size = add_cell(&mut grid, cell_shape, cell_type, 'x', start_row);
-        if cell_size.start_col == 999 { continue; }
+        if cell_size.start_col == 999 {
+            continue;
+        }
         start_row = cell_size.start_row;
         cell_size_list.push(cell_size);
     }
 
     // let grid_str = grid
-       // .into_iter()
-        //.filter(|row| !row.iter().all(|c| *c == ' '))
-        // .map(|row| row.into_iter().collect::<String>())
-        // .collect::<Vec<_>>()
-        // .join("\n");
+    // .into_iter()
+    //.filter(|row| !row.iter().all(|c| *c == ' '))
+    // .map(|row| row.into_iter().collect::<String>())
+    // .collect::<Vec<_>>()
+    // .join("\n");
 
     // println!("{}", grid_str);
 
@@ -38,8 +38,6 @@ pub fn arrange_grid(grid_size: (usize, usize), cell_list: &[String]) -> Vec<Cell
 
     // grid
 }
-
-
 
 impl CellSize {
     pub fn get_start_row(&self) -> usize {
@@ -63,7 +61,6 @@ impl CellSize {
     }
 }
 
-
 fn can_place_cell(grid: &[Vec<char>], row: usize, col: usize, width: usize, height: usize) -> bool {
     for r in row..row + height {
         for c in col..col + width {
@@ -75,7 +72,14 @@ fn can_place_cell(grid: &[Vec<char>], row: usize, col: usize, width: usize, heig
     true
 }
 
-fn place_cell(grid: &mut [Vec<char>], row: usize, col: usize, width: usize, height: usize, char: char) {
+fn place_cell(
+    grid: &mut [Vec<char>],
+    row: usize,
+    col: usize,
+    width: usize,
+    height: usize,
+    char: char,
+) {
     for r in row..row + height {
         for c in col..col + width {
             grid[r][c] = char;
@@ -83,7 +87,13 @@ fn place_cell(grid: &mut [Vec<char>], row: usize, col: usize, width: usize, heig
     }
 }
 
-fn try_place_cell(grid: &mut [Vec<char>], width: usize, height: usize, char: char, start_row: usize) -> (usize, usize) {
+fn try_place_cell(
+    grid: &mut [Vec<char>],
+    width: usize,
+    height: usize,
+    char: char,
+    start_row: usize,
+) -> (usize, usize) {
     for row in start_row..grid.len() {
         for col in 0..=grid[0].len() - width {
             if can_place_cell(grid, row, col, width, height) {
@@ -95,7 +105,13 @@ fn try_place_cell(grid: &mut [Vec<char>], width: usize, height: usize, char: cha
     (start_row, 999)
 }
 
-fn add_cell(grid: &mut [Vec<char>], cell_shape: &str, cell_type: &str, cell_char: char, start_row: usize) -> CellSize {
+fn add_cell(
+    grid: &mut [Vec<char>],
+    cell_shape: &str,
+    cell_type: &str,
+    cell_char: char,
+    start_row: usize,
+) -> CellSize {
     let (num1, num2) = cell_shape.split_once('x').unwrap();
     let num1: usize = num1.parse().unwrap();
     let num2: usize = num2.parse().unwrap();
